@@ -1,62 +1,83 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const fs = require('fs/promises');
 const crypto = require('crypto');
+const helperTalkers = require('./Helpers/helperTalkers');
+const validator = require('./Autheticator/validator');
+const authenticator = require('./Autheticator/authenticator');
+const handlerAllow = require('./Handlers/handlerAllow');
+
+const { allTalkers, getById, totTalker, upTalker, delTalker, depurateTalkers } = helperTalkers;
+const { authenticValidator } = validator;
+const { validateFields } = authenticator;
+
+// allTalkers, getById, upTalker, delTalker, depurateTalkers, totTalker 
 
 const app = express();
 app.use(bodyParser.json());
 
 const HTTP_OK_STATUS = 200;
 const PORT = '3000';
+const NOT_FOUND = { message: 'Pessoa palestrante não encontrada' };
 
 // não remova esse endpoint, e para o avaliador funcionar
 app.get('/', (_request, response) => {
   response.status(HTTP_OK_STATUS).send();
 });
-// não remover acima
+// NÃO REMOVER CAMPO ACIMA
 
-const TALKER_JSON = './talker.json';
+app.get('/talker/search', handlerAllow, async (req, res) => {
+  const { q } = req.query;
+  let result = [];
+  if (!q) {
+    result = await allTalkers();
+  } else {
+    result = await depurateTalkers('name', q);
+  }
+  return res.status(HTTP_OK_STATUS).send(result);
+});
 
 app.get('/talker', async (_req, res) => {
-  const stringTalker = await fs.readFile(TALKER_JSON, 'utf-8');
-  const jsonTalker = JSON.parse(stringTalker);
-  res.status(HTTP_OK_STATUS).send(jsonTalker);
+  const talkerJson = await allTalkers();
+  return res.status(HTTP_OK_STATUS).send(talkerJson);
 });
 
 app.get('/talker/:id', async (req, res) => {
   const { id } = req.params;
-  const stringTalker = await fs.readFile(TALKER_JSON, 'utf-8');
-  const jsonTalker = [
-    ...JSON.parse(stringTalker),
-  ];
-  const talkerResult = jsonTalker.find((talker) => talker.id === Number(id));
-  if (!talkerResult) {
-    res.status(404).json({
-      message: 'Pessoa palestrante não encontrada',
-    });
+  
+  const talker = await getById(id);
+
+  if (!talker) {
+    return res.status(404).json(NOT_FOUND); 
   }
-  res.status(HTTP_OK_STATUS).json(talkerResult);
+  return res.status(HTTP_OK_STATUS).json(talker);
 });
 
 app.post('/login', (req, res) => {
-  const { email, password } = req.body;
-  
-  const MANDATORY_EMAIL = { message: 'O campo "email" é obrigatório' };
-  const EMAIL_FORMAT = { message: 'O "email" deve ter o formato "email@email.com"' };
-  const MANDATORY_PASSWORD = { message: 'O campo "password" é obrigatório' };
-  const MIN_PASSWORD = { message: 'O "password" deve ter pelo menos 6 caracteres' };
-  const REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  // REGEX LINK REFERENCE --> https://stackoverflow.com/questions/46155/how-can-i-validate-an-email-address-in-javascript
-  if (!email) res.status(400).json(MANDATORY_EMAIL); 
-  
-  if (!REGEX.test(email)) res.status(400).json(EMAIL_FORMAT); 
-  
-  if (!password) res.status(400).json(MANDATORY_PASSWORD); 
+  const user = req.body;
 
-  if (password.length < 6) res.status(400).json(MIN_PASSWORD); 
-
+  if (validateFields(user)) {
+    return res.status(400).json(validateFields(user));
+  }
   const token = crypto.randomBytes(8).toString('hex');
-  res.status(200).json({ token });
+  res.status(HTTP_OK_STATUS).json({ token });
+});
+
+app.post('/talker', handlerAllow, authenticValidator, async (req, res) => {
+  const { talker } = req;
+  await totTalker(talker);
+  return res.status(201).json(talker);
+});
+
+app.put('/talker/:id', handlerAllow, authenticValidator, async (req, res) => {
+  const { talker, params: { id } } = req;
+  await upTalker(id, talker);
+  return res.status(HTTP_OK_STATUS).json(talker);
+});
+
+app.delete('/talker/:id', handlerAllow, async (req, res) => {
+  const { id } = req.params;
+  await delTalker(id);
+  return res.status(204).end();
 });
 
 app.listen(PORT, () => {
